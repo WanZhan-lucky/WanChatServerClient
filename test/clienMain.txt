@@ -1,0 +1,190 @@
+这段代码是一个基于
+        C++ 的简单聊天客户端，主要实现了用户注册、登录、一对一聊天、群聊等功能，并且采用了多线程技术来实现消息的接收和发送。
+
+            下面我们详细讲解代码的各个部分：
+
+    -- -
+
+    ##* * 1. 头文件引入 **
+```cpp
+#include <chrono>
+#include <ctime>
+#include <functional>
+#include <iostream>
+#include <string>
+#include <thread>
+#include <unordered_map>
+#include <vector>
+
+#include "json.hpp"
+        using namespace std;
+using json = nlohmann::json;
+
+#include <arpa/inet.h>
+#include <netinet/in.h>
+#include <semaphore.h>
+#include <sys/socket.h>
+#include <sys/types.h>
+#include <unistd.h>
+
+#include <atomic>
+
+#include "group.hpp"
+#include "public.hpp"
+#include "user.hpp"
+```
+- `#include <chrono>` 和 `#include <ctime>` 用于处理时间，`chrono` 提供高精度时间测量功能。
+- `#include <functional>` 允许使用 `std::function` 进行回调函数绑定。
+- `#include <iostream>` 用于标准输入输出，如 `cin` 和 `cout`。
+- `#include <string>` 用于字符串操作。
+- `#include <thread>` 允许使用 `std::thread` 进行多线程编程。
+- `#include <unordered_map>` 允许使用 `unordered_map` 进行键值对存储，类似于 Python 的 `dict`。
+- `#include <vector>` 用于动态数组管理。
+- `#include "json.hpp"` 引入第三方 JSON 库 `nlohmann::json`，用于 JSON 数据的解析和序列化。
+- `#include <arpa/inet.h>` 和 `#include <netinet/in.h>` 处理 IPv4 网络地址转换和结构体定义。
+- `#include <semaphore.h>` 用于线程同步的信号量（`sem_t`）。
+- `#include <sys/socket.h>` 和 `#include <sys/types.h>` 处理 socket 编程。
+- `#include <unistd.h>` 处理 UNIX 系统调用，如 `close()` 关闭文件描述符。
+- `#include <atomic>` 允许使用 `std::atomic` 实现原子操作，防止多线程冲突。
+- `#include "group.hpp"`, `#include "public.hpp"`, `#include "user.hpp"` 是自定义头文件，分别处理群组、公共信息和用户信息。
+
+---
+
+## **2. 全局变量**
+```cpp
+// 记录当前系统登录的用户信息
+User g_currentUser;
+// 记录当前登录用户的好友列表信息
+vector<User> g_currentUserFriendList;
+// 记录当前登录用户的群组列表信息
+vector<Group> g_currentUserGroupList;
+
+// 控制主菜单页面程序
+bool isMainMenuRunning = false;
+
+// 用于读写线程之间的通信
+sem_t rwsem;
+// 记录登录状态
+atomic_bool g_isLoginSuccess{false};
+``` - `User g_currentUser` 记录当前登录的用户信息。 - `vector<User>
+        g_currentUserFriendList` 记录当前登录用户的好友列表。 - `vector<Group>
+            g_currentUserGroupList` 记录当前登录用户加入的群组信息。 - `bool
+                isMainMenuRunning` 控制主菜单是否运行，初始值为 `false`。 - `sem_t
+                    rwsem` 是一个信号量变量，用于线程间通信（读写线程同步）。 - `atomic_bool
+                        g_isLoginSuccess {
+  false
+}
+` 是原子变量，表示用户是否成功登录，防止多线程竞争条件。
+
+    -- -
+
+    ##* * 3. `main` 函数（主函数） **
+```cpp int main(int argc, char **argv) {
+  if (argc < 3) {
+    cerr << "command invalid! example: ./ChatClient 127.0.0.1 6000" << endl;
+    exit(-1);
+  }
+  ``` - `argc` 代表命令行参数的个数，`argv` 是存储命令行参数的数组。 - `./ ChatClient 127.0.0.1 6000` 表示运行客户端程序，并连接到 `127.0.0.1 : 6000` 的服务器。 - `if (
+      argc < 3)` 检查是否提供了 IP 和端口号，否则输出错误信息并退出程序。
+
+      -- -
+
+      ## #** 3.1 创建 socket 连接 **
+```cpp char *ip = argv[1];
+  uint16_t port = atoi(argv[2]);
+
+  int clientfd = socket(AF_INET, SOCK_STREAM, 0);
+  if (-1 == clientfd) {
+    cerr << "socket create error" << endl;
+    exit(-1);
+  }
+  ``` - `char *ip = argv[1]` 取出用户输入的 IP 地址。 - `uint16_t port =
+                        atoi(argv[2])` 取出端口号，并转换为整数。 - `socket(
+                            AF_INET, SOCK_STREAM,
+                            0)` 创建一个 TCP 连接（`SOCK_STREAM` 代表 TCP）。 -
+                        如果 `socket` 失败（返回 `-
+                        1`），则打印错误信息并退出。
+
+                        -- -
+
+                        ## # * *3.2 连接服务器 * *
+```cpp sockaddr_in server;
+  memset(&server, 0, sizeof(sockaddr_in));
+
+  server.sin_family = AF_INET;
+  server.sin_port = htons(port);
+  server.sin_addr.s_addr = inet_addr(ip);
+
+  if (-1 == connect(clientfd, (sockaddr *)&server, sizeof(sockaddr_in))) {
+    cerr << "connect server error" << endl;
+    close(clientfd);
+    exit(-1);
+  }
+  ``` - 定义 `sockaddr_in` 结构体，并用 `memset` 清零。 - `server.sin_family =
+      AF_INET` 指定 IPv4。 - `server.sin_port =
+          htons(port)` 转换端口号为网络字节序（大端序）。 - `server.sin_addr
+                                                                .s_addr =
+              inet_addr(ip)` 将 IP 地址转换为 `in_addr` 结构体格式。 - `connect(
+                  clientfd, (sockaddr *)&server,
+                  sizeof(sockaddr_in))` 连接服务器。 -
+              如果 `connect` 失败，则关闭 `clientfd` 并退出。
+
+              -- -
+
+              ## # * *3.3 初始化信号量，并创建接收线程 * *
+```cpp sem_init(&rwsem, 0, 0);
+
+  std::thread readTask(readTaskHandler, clientfd);
+  readTask.detach();
+  ``` - `sem_init(
+      &rwsem, 0,
+      0)` 初始化信号量 `rwsem`，初始值为 `0`，用于读写线程同步。 - `std::thread
+          readTask(readTaskHandler, clientfd);
+  ` 创建一个新线程，运行 `readTaskHandler` 负责接收消息。 - `readTask.detach();
+  ` 让接收线程在后台运行，主线程不会等待它结束。
+
+      -- -
+
+      ##* * 4. 主菜单界面 **
+```cpp for (;;) {
+    cout << "========================" << endl;
+    cout << "1. login" << endl;
+    cout << "2. register" << endl;
+    cout << "3. quit" << endl;
+    cout << "========================" << endl;
+    cout << "choice:";
+    int choice = 0;
+    cin >> choice;
+    cin.get();
+    ``` - 无限循环显示主菜单，让用户选择 `1. 登录`、`2. 注册`、`3. 退出`。 - `cin >>
+        choice;
+    ` 获取用户输入。 - `cin.get();
+    ` 读取缓冲区的回车，避免影响后续 `getline()` 读取。
+
+        -- -
+
+        ##* * 5. 登录逻辑 **
+```cpp json js;
+    js["msgid"] = LOGIN_MSG;
+    js["id"] = id;
+    js["password"] = pwd;
+    string request = js.dump();
+
+    g_isLoginSuccess = false;
+    send(clientfd, request.c_str(), strlen(request.c_str()) + 1, 0);
+    sem_wait(&rwsem);
+    ``` -
+        创建 JSON
+            对象，设置 `msgid` 为 `LOGIN_MSG`，并加入 `id` 和 `password`。 - `send(
+                clientfd, request.c_str(), strlen(request.c_str()) + 1, 0);
+    ` 发送数据到服务器。 - `sem_wait(&rwsem);
+    ` 等待服务器返回结果。
+
+        -- -
+
+        这个代码结构较长，剩下的部分包括： - 注册逻辑 -
+        接收消息处理(`readTaskHandler`) - 解析 JSON 数据 -
+        处理好友列表和群组列表 -
+        处理用户聊天功能
+
+        如果需要，我可以继续详细讲解这些部分！🚀

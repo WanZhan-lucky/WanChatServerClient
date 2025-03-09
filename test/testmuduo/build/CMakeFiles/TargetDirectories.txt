@@ -1,0 +1,3 @@
+/home/wanzhan/Desktop/Wanchat/testmuduo/build/CMakeFiles/server.dir
+/home/wanzhan/Desktop/Wanchat/testmuduo/build/CMakeFiles/edit_cache.dir
+/home/wanzhan/Desktop/Wanchat/testmuduo/build/CMakeFiles/rebuild_cache.dir
