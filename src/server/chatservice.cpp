@@ -169,8 +169,6 @@ void ChatService::oneChat(const TcpConnectionPtr& conn, json& js,
     _redis.publish(toid, js.dump());
     return;
   }
-  2
-
       // 离线不在线
       _offlinemsgModel.insert(toid, js.dump());
 }
